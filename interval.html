@@ -185,13 +185,11 @@
 (function(){
   const qs = new URLSearchParams(window.location.search);
 
-  // Params (accept tz/cb for coherence, but only tz is kept as meta)
   const prep = toInt(qs.get('prep'), 0);
   const work = toInt(qs.get('work'), null);
   const rest = toInt(qs.get('rest'), 0);
   const reps = toInt(qs.get('reps'), null);
   const tz   = (qs.get('tz') || '').trim(); // optional
-  // cb ignored intentionally
 
   const errBox = el('errBox');
   const phaseText = el('phaseText');
@@ -203,7 +201,6 @@
   const resetBtn = el('resetBtn');
   const skipBtn  = el('skipBtn');
 
-  // Validate required
   const problems = [];
   if (work === null || work <= 0) problems.push("Paramètre requis invalide : work (secondes de travail, > 0)");
   if (reps === null || reps <= 0) problems.push("Paramètre requis invalide : reps (nombre de répétitions, > 0)");
@@ -222,47 +219,59 @@
     return;
   }
 
-  // Total duration for progress: prep + reps*work + (reps-1)*rest (no rest after last rep)
+  // Total duration for progress: prep + reps*work + (reps-1)*rest
   const totalSeconds = prep + (reps * work) + (Math.max(0, reps - 1) * rest);
 
-  // State machine
   const PHASE = { PREP:"PREP", WORK:"WORK", REST:"REST", DONE:"DONE" };
   let phase = prep > 0 ? PHASE.PREP : PHASE.WORK;
-  let repIndex = 1; // 1..reps
+  let repIndex = 1;
   let remaining = (phase === PHASE.PREP) ? prep : work;
 
-  let startedAtMs = performance.now();
-  let lastTickMs = startedAtMs;
-  let elapsedTotal = 0; // in seconds, integer-ish
+  let lastTickMs = performance.now();
 
-  // Render first frame
+  // Beep helpers
+  const shortBeep = (freq=1100, durMs=120, vol=0.12)=>{
+    try{
+      const C = window.AudioContext||window.webkitAudioContext;
+      const ctx = new C();
+      const o = ctx.createOscillator(), g = ctx.createGain();
+      o.connect(g); g.connect(ctx.destination);
+      o.type='sine'; o.frequency.value=freq; g.gain.value=vol;
+      o.start(); setTimeout(()=>{ o.stop(); ctx.close(); }, durMs);
+    }catch(e){}
+  };
+  const longBeep = (freq=880, durMs=420, vol=0.2)=>{
+    try{
+      const C = window.AudioContext||window.webkitAudioContext;
+      const ctx = new C();
+      const o = ctx.createOscillator(), g = ctx.createGain();
+      o.connect(g); g.connect(ctx.destination);
+      o.type='sine'; o.frequency.value=freq; g.gain.value=vol;
+      o.start(); setTimeout(()=>{ o.stop(); ctx.close(); }, durMs);
+    }catch(e){}
+  };
+
+  // Track last displayed second per phase so we beep only once per second change
+  let lastDispByPhase = { PREP:null, WORK:null, REST:null };
+
   render();
+  const intervalId = setInterval(tick, 100);
 
-  // Timer loop (timestamp-based to reduce drift)
-  const interval = setInterval(tick, 100);
-
-  resetBtn.addEventListener('click', resetAll);
-  skipBtn.addEventListener('click', skipPhase);
+  resetBtn.addEventListener('click', () => window.location.reload());
+  skipBtn.addEventListener('click', () => { if (phase !== PHASE.DONE) remaining = 0; });
 
   function tick(){
     const now = performance.now();
     const dt = (now - lastTickMs) / 1000;
     lastTickMs = now;
 
-    // Accumulate fractional time, but decrement remaining when >= 1s to keep UI stable
-    // We'll do smooth decrement and floor for display.
     remaining = Math.max(0, remaining - dt);
 
-    // Progress uses total elapsed (smooth)
-    const elapsedSmooth = Math.min(totalSeconds, (totalSeconds - remainingInScenario() + remainingScenarioElapsedSmooth()));
-    // Actually compute progress using derived total remaining across scenario:
     const totalRemaining = remainingGlobalSmooth();
     const progress = totalSeconds > 0 ? (1 - (totalRemaining / totalSeconds)) : 1;
     progressBar.style.width = (Math.max(0, Math.min(1, progress)) * 100).toFixed(2) + "%";
 
-    if (remaining <= 0.001){
-      advance();
-    }
+    if (remaining <= 0.001) advance();
     render();
   }
 
@@ -279,7 +288,6 @@
         onDone();
         return;
       }
-      // Go to REST only if rest > 0, otherwise jump directly to next WORK
       if (rest > 0){
         phase = PHASE.REST;
         remaining = rest;
@@ -299,32 +307,17 @@
   }
 
   function onDone(){
-    clearInterval(interval);
+    clearInterval(intervalId);
     setPhase("FIN", "accent");
     phaseDot.style.boxShadow = "0 0 0 6px rgba(34,197,94,.18)";
     timeDisplay.textContent = "00:00";
     metaLine.textContent = `Terminé — ${reps} répétitions`;
     progressBar.style.width = "100%";
-  }
-
-  function resetAll(){
-    // Full reset to initial
-    phase = prep > 0 ? PHASE.PREP : PHASE.WORK;
-    repIndex = 1;
-    remaining = (phase === PHASE.PREP) ? prep : work;
-    lastTickMs = performance.now();
-    // Restart page cleanly = simplest and avoids drift/interval re-init complexity
-    // Keep URL params intact
-    window.location.reload();
-  }
-
-  function skipPhase(){
-    if (phase === PHASE.DONE) return;
-    remaining = 0; // next tick will advance immediately
+    // Optional: long beep at the very end (once)
+    longBeep(880, 520, 0.22);
   }
 
   function render(){
-    // Phase label + dot color
     if (phase === PHASE.PREP){
       setPhase("PRÊT", "warn");
       metaLine.textContent = metaText();
@@ -334,11 +327,26 @@
     } else if (phase === PHASE.REST){
       setPhase("RÉCUP", "muted");
       metaLine.textContent = metaText();
-    } else if (phase === PHASE.DONE){
-      // handled in onDone
     }
 
-    timeDisplay.textContent = formatMMSS(Math.ceil(remaining));
+    const disp = Math.ceil(remaining);
+    timeDisplay.textContent = formatMMSS(disp);
+
+    // --- Beeps on last 3 seconds for WORK and REST only ---
+    if (phase === PHASE.WORK || phase === PHASE.REST){
+      const last = lastDispByPhase[phase];
+      if (disp !== last){
+        // beep on 3..1 only
+        if (disp <= 3 && disp >= 1){
+          // Different pitch so user senses the phase
+          shortBeep(phase === PHASE.REST ? 900 : 1200, 120, 0.12);
+        }
+        lastDispByPhase[phase] = disp;
+      }
+    } else {
+      // keep PREP tracking but no beep requested
+      lastDispByPhase[phase] = disp;
+    }
   }
 
   function metaText(){
@@ -351,7 +359,6 @@
   function setPhase(label, kind){
     phaseText.textContent = label;
 
-    // Map dot & glow
     if (kind === "accent"){
       phaseDot.style.background = "var(--accent)";
       phaseDot.style.boxShadow = "0 0 0 4px rgba(34,197,94,.18)";
@@ -367,33 +374,25 @@
     }
   }
 
-  // Compute remaining across whole scenario smoothly (for progress)
   function remainingGlobalSmooth(){
     if (phase === PHASE.DONE) return 0;
 
-    // Remaining in current phase is `remaining`.
-    // Remaining future phases:
-    // If phase is PREP: remaining PREP + all reps: reps*work + (reps-1)*rest
-    // If phase is WORK: remaining work + future (if repIndex < reps => rest + (remaining reps)*work + (remaining rests))
-    // If phase is REST: remaining rest + remaining reps*work + remaining rests
     if (phase === PHASE.PREP){
       return remaining + (reps * work) + (Math.max(0, reps - 1) * rest);
     }
     if (phase === PHASE.WORK){
-      const repsLeftAfterThisWork = reps - repIndex; // reps remaining AFTER finishing current WORK
-      const restsLeft = Math.max(0, repsLeftAfterThisWork); // one rest between reps, so rest count equals reps left (since no rest after last)
-      // But if rest == 0, restsLeft contributes 0 anyway.
+      const repsLeftAfterThisWork = reps - repIndex;
+      const restsLeft = Math.max(0, repsLeftAfterThisWork);
       return remaining + (repsLeftAfterThisWork * work) + (restsLeft * rest);
     }
     if (phase === PHASE.REST){
-      const repsLeftIncludingNextWork = reps - repIndex; // reps remaining AFTER current rep (since REST happens after current rep work)
+      const repsLeftIncludingNextWork = reps - repIndex;
       const restsLeftAfterThisRest = Math.max(0, repsLeftIncludingNextWork - 1);
       return remaining + (repsLeftIncludingNextWork * work) + (restsLeftAfterThisRest * rest);
     }
     return 0;
   }
 
-  // Helpers
   function el(id){ return document.getElementById(id); }
   function toInt(v, fallback){
     if (v === null || v === undefined) return fallback;
@@ -411,11 +410,6 @@
     errBox.style.display = "block";
     errBox.textContent = msg;
   }
-
-  // These are unused now but kept to avoid refactor noise if you extend later:
-  function remainingInScenario(){ return 0; }
-  function remainingScenarioElapsedSmooth(){ return 0; }
-
 })();
 </script>
 </body>
