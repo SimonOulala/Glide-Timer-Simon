@@ -1,0 +1,195 @@
+<!doctype html>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Timer</title>
+<style>
+  :root{
+    /* Bleu océan plus foncé */
+    --bg:#013A63;
+    --fg:#ffffff;
+  }
+  html,body{height:100%}
+  body{
+    margin:0; background:var(--bg); color:var(--fg);
+    font-family:system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,Arial;
+    display:flex; align-items:center; justify-content:center;
+    position:relative;
+  }
+  .wrap{
+    text-align:center;
+    padding:120px;
+    display:flex;
+    flex-direction:column;
+    align-items:center;
+    gap:clamp(12px, 5vh, 40px);
+  }
+  .phase{
+    font-size:clamp(35px,6vw,36px);
+    opacity:.95;
+    margin-bottom:24px;
+    font-weight:600
+  }
+  .phase.work{
+    font-size:clamp(45px,6vw,36px);
+    opacity:.95;
+    margin-bottom:24px;
+    font-weight:600
+  }
+  .time{ font-size:60px; letter-spacing:1px; line-height:1; font-weight:800 }
+
+  /* Signature */
+  .brand{
+    position:absolute;
+    right:14px;
+    bottom:10px;
+    font-size:13px;
+    font-weight:700;
+    letter-spacing:.2px;
+    opacity:.75;
+    user-select:none;
+  }
+</style>
+
+<div class="wrap">
+  <div class="phase" id="phase">Prépare toi pour l'exercice</div>
+  <div class="time" id="time">00:00</div>
+</div>
+<div class="brand">Coach Simon</div>
+
+<script>
+  // --- Params envoyés par Glide ---
+  const q = new URLSearchParams(location.search);
+  const prep = Math.max(0, +q.get('prep')||0);   // secondes de préparation
+  const dur  = Math.max(0, +q.get('dur')||0);    // secondes de travail
+  const start = Date.now();
+  const mode  = (q.get('mode') || 'work');       // 'work' (défaut) ou 'rest'
+
+  // Option vibration sur les 5 dernières secondes (0/1)
+  // ex: &vib=1
+  const vibEnabled = (q.get('vib') || '0') === '1';
+
+  const phaseEl = document.getElementById('phase');
+  const timeEl  = document.getElementById('time');
+
+  // --- Wake Lock (garder l'écran allumé) ---
+  let wakeLock = null;
+  async function requestWakeLock() {
+    try {
+      if ('wakeLock' in navigator && !wakeLock) {
+        wakeLock = await navigator.wakeLock.request('screen');
+        wakeLock.addEventListener?.('release', () => { wakeLock = null; });
+      }
+    } catch (e) { console.log('WakeLock error', e); }
+  }
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible' && !wakeLock) requestWakeLock();
+  });
+  window.addEventListener('click', requestWakeLock, { once: true });
+  window.addEventListener('touchstart', requestWakeLock, { once: true });
+  requestWakeLock();
+  window.addEventListener('beforeunload', () => { try { wakeLock?.release(); } catch {} });
+
+  // --- Utils ---
+  const fmt = (s)=>{
+    s = Math.max(0, Math.floor(s));
+    const m = Math.floor(s/60).toString().padStart(2,'0');
+    const sec = (s%60).toString().padStart(2,'0');
+    return `${m}:${sec}`;
+  };
+
+  const shortBeep = (freq=1000, dur=120, vol=0.12)=>{
+    try{
+      const C = window.AudioContext||window.webkitAudioContext;
+      const ctx = new C();
+      const o = ctx.createOscillator(), g = ctx.createGain();
+      o.connect(g); g.connect(ctx.destination);
+      o.type='sine'; o.frequency.value=freq; g.gain.value=vol;
+      o.start(); setTimeout(()=>{o.stop(); ctx.close();}, dur);
+    }catch(e){}
+  };
+  const longBeep = (freq=880, dur=320, vol=0.16)=>{
+    try{
+      const C = window.AudioContext||window.webkitAudioContext;
+      const ctx = new C();
+      const o = ctx.createOscillator(), g = ctx.createGain();
+      o.connect(g); g.connect(ctx.destination);
+      o.type='sine'; o.frequency.value=freq; g.gain.value=vol;
+      o.start(); setTimeout(()=>{o.stop(); ctx.close();}, dur);
+    }catch(e){}
+  };
+
+  // Vibration helper (si supporté)
+  const buzz = (pattern)=>{
+    if (!vibEnabled) return;
+    if (navigator.vibrate) navigator.vibrate(pattern);
+  };
+
+  // états pour biper une seule fois par seconde affichée
+  let lastPrepDisplay = null;
+  let lastRunDisplay  = null;
+  let endLongBeepDone = false;
+
+  const tick = ()=>{
+    const now = Date.now();
+    const elapsed = (now - start)/1000;
+
+    const prepRemain = Math.max(0, prep - elapsed);
+    const runRemain  = Math.max(0, prep + dur - elapsed);
+
+    // --- Phase Préparation ---
+    if (prep > 0 && prepRemain > 0) {
+      phaseEl.textContent = "Prépare toi pour l'exercice";
+      phaseEl.className = "phase";
+      const disp = Math.floor(prepRemain);
+      timeEl.textContent = fmt(prepRemain);
+
+      if (disp !== lastPrepDisplay) {
+        // bip sur les 5 dernières secondes (5..1), puis bip long sur 0
+        if (disp <= 5 && disp >= 1) {
+          shortBeep(1000); buzz(50);
+        }
+        if (disp === 0) {
+          longBeep(900, 360, 0.18);
+          buzz([80,40,80]);
+        }
+        lastPrepDisplay = disp;
+      }
+      return;
+    }
+
+    // --- Phase Travail (ou Récupération si mode=rest) ---
+    if (runRemain > 0) {
+      phaseEl.textContent = (mode === 'rest') ? "Récupération" : "C'est parti !";
+      phaseEl.className   = (mode === 'rest') ? "phase" : "phase work";
+      const disp = Math.floor(runRemain);
+      timeEl.textContent = fmt(runRemain);
+
+      if (disp !== lastRunDisplay) {
+        // bip sur les 5 dernières secondes (5..1), puis bip long sur 0
+        if (disp <= 5 && disp >= 1) {
+          shortBeep(1200); buzz(50);
+        }
+        if (disp === 0) {
+          longBeep(880, 420, 0.2);
+          buzz([100,60,120]);
+          endLongBeepDone = true;
+        }
+        lastRunDisplay = disp;
+      }
+      return;
+    }
+
+    // --- Terminé ---
+    phaseEl.textContent = (mode === 'rest') ? "Repos terminé" : "Terminé";
+    phaseEl.className = "phase";
+    timeEl.textContent  = "00:00";
+    if (!endLongBeepDone) {
+      longBeep(880, 420, 0.2);
+      buzz([100,60,120]);
+      endLongBeepDone = true;
+    }
+  };
+
+  tick();
+  const iv = setInterval(tick, 200);
+  setTimeout(()=>clearInterval(iv), 2*60*60*1000);
+</script>
