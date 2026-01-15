@@ -1,0 +1,422 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Interval Timer</title>
+  <style>
+    :root{
+      --bg:#0b0f14;
+      --card:#111827;
+      --text:#e5e7eb;
+      --muted:#9ca3af;
+      --accent:#22c55e;
+      --danger:#ef4444;
+      --warn:#f59e0b;
+      --barbg:#1f2937;
+    }
+    *{box-sizing:border-box}
+    html,body{height:100%}
+    body{
+      margin:0;
+      font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji","Segoe UI Emoji";
+      background:radial-gradient(1200px 600px at 50% 20%, rgba(34,197,94,.18), transparent 60%),
+                 radial-gradient(900px 500px at 20% 80%, rgba(245,158,11,.12), transparent 55%),
+                 var(--bg);
+      color:var(--text);
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      padding:16px;
+    }
+    .wrap{
+      width:min(680px, 100%);
+      background:rgba(17,24,39,.85);
+      border:1px solid rgba(255,255,255,.08);
+      box-shadow: 0 20px 60px rgba(0,0,0,.45);
+      border-radius:16px;
+      padding:22px 18px 18px;
+      position:relative;
+      overflow:hidden;
+    }
+    .top{
+      display:flex;
+      align-items:flex-start;
+      justify-content:space-between;
+      gap:12px;
+      margin-bottom:12px;
+    }
+    .status{
+      display:flex;
+      flex-direction:column;
+      gap:6px;
+    }
+    .badge{
+      display:inline-flex;
+      align-items:center;
+      gap:8px;
+      padding:6px 10px;
+      border-radius:999px;
+      font-weight:700;
+      letter-spacing:.5px;
+      width:fit-content;
+      border:1px solid rgba(255,255,255,.10);
+      background:rgba(255,255,255,.04);
+    }
+    .dot{
+      width:10px;height:10px;border-radius:50%;
+      background:var(--muted);
+      box-shadow:0 0 0 4px rgba(156,163,175,.18);
+    }
+    .meta{
+      color:var(--muted);
+      font-size:14px;
+      line-height:1.25;
+    }
+    .time{
+      font-variant-numeric: tabular-nums;
+      font-size: clamp(56px, 10vw, 92px);
+      font-weight: 800;
+      letter-spacing: -1px;
+      text-align:right;
+      min-width: 180px;
+    }
+    .progress{
+      height:12px;
+      background:var(--barbg);
+      border-radius:999px;
+      overflow:hidden;
+      border:1px solid rgba(255,255,255,.08);
+      margin: 14px 0 12px;
+    }
+    .bar{
+      height:100%;
+      width:0%;
+      background:linear-gradient(90deg, rgba(34,197,94,.95), rgba(245,158,11,.90));
+      border-radius:999px;
+      transition: width .15s linear;
+    }
+    .controls{
+      display:flex;
+      gap:10px;
+      margin-top:10px;
+    }
+    button{
+      appearance:none;
+      border:none;
+      border-radius:12px;
+      padding:12px 14px;
+      font-weight:700;
+      cursor:pointer;
+      color:var(--text);
+      background:rgba(255,255,255,.06);
+      border:1px solid rgba(255,255,255,.10);
+      flex:1;
+      transition: transform .05s ease, background .15s ease;
+    }
+    button:hover{ background:rgba(255,255,255,.09); }
+    button:active{ transform: translateY(1px); }
+    .btn-primary{
+      background:rgba(34,197,94,.18);
+      border-color:rgba(34,197,94,.35);
+    }
+    .btn-warn{
+      background:rgba(245,158,11,.16);
+      border-color:rgba(245,158,11,.35);
+    }
+    .err{
+      margin-top:10px;
+      padding:10px 12px;
+      border-radius:12px;
+      border:1px solid rgba(239,68,68,.35);
+      background:rgba(239,68,68,.10);
+      color:#fecaca;
+      font-size:14px;
+      display:none;
+      white-space:pre-wrap;
+    }
+    .brand{
+      position:absolute;
+      right:14px;
+      bottom:10px;
+      color:rgba(229,231,235,.60);
+      font-size:13px;
+      font-weight:700;
+      letter-spacing:.2px;
+      user-select:none;
+    }
+    .hint{
+      color:rgba(156,163,175,.75);
+      font-size:12px;
+      margin-top:6px;
+      text-align:center;
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="top">
+      <div class="status">
+        <div class="badge" id="phaseBadge">
+          <span class="dot" id="phaseDot"></span>
+          <span id="phaseText">PRÊT</span>
+        </div>
+        <div class="meta" id="metaLine">—</div>
+      </div>
+      <div class="time" id="timeDisplay">00:00</div>
+    </div>
+
+    <div class="progress" aria-label="Progression">
+      <div class="bar" id="progressBar"></div>
+    </div>
+
+    <div class="controls">
+      <button class="btn-primary" id="resetBtn" type="button">Reset</button>
+      <button class="btn-warn" id="skipBtn" type="button">Skip</button>
+    </div>
+
+    <div class="hint" id="hintLine">prep → (travail / récup) × reps → fin</div>
+    <div class="err" id="errBox"></div>
+
+    <div class="brand">Coach Simon</div>
+  </div>
+
+<script>
+(function(){
+  const qs = new URLSearchParams(window.location.search);
+
+  // Params (accept tz/cb for coherence, but only tz is kept as meta)
+  const prep = toInt(qs.get('prep'), 0);
+  const work = toInt(qs.get('work'), null);
+  const rest = toInt(qs.get('rest'), 0);
+  const reps = toInt(qs.get('reps'), null);
+  const tz   = (qs.get('tz') || '').trim(); // optional
+  // cb ignored intentionally
+
+  const errBox = el('errBox');
+  const phaseText = el('phaseText');
+  const phaseDot  = el('phaseDot');
+  const metaLine  = el('metaLine');
+  const timeDisplay = el('timeDisplay');
+  const progressBar = el('progressBar');
+
+  const resetBtn = el('resetBtn');
+  const skipBtn  = el('skipBtn');
+
+  // Validate required
+  const problems = [];
+  if (work === null || work <= 0) problems.push("Paramètre requis invalide : work (secondes de travail, > 0)");
+  if (reps === null || reps <= 0) problems.push("Paramètre requis invalide : reps (nombre de répétitions, > 0)");
+  if (prep < 0) problems.push("Paramètre invalide : prep (>= 0)");
+  if (rest < 0) problems.push("Paramètre invalide : rest (>= 0)");
+
+  if (problems.length){
+    showError("❌ URL invalide.\n" + problems.map(p=>"• "+p).join("\n") +
+      "\n\nExemple : interval.html?prep=3&work=5&rest=25&reps=10&tz=Europe/Paris&cb=123");
+    setPhase("ERREUR", "danger");
+    timeDisplay.textContent = "—";
+    metaLine.textContent = "Corrige les paramètres URL.";
+    progressBar.style.width = "0%";
+    resetBtn.disabled = true;
+    skipBtn.disabled = true;
+    return;
+  }
+
+  // Total duration for progress: prep + reps*work + (reps-1)*rest (no rest after last rep)
+  const totalSeconds = prep + (reps * work) + (Math.max(0, reps - 1) * rest);
+
+  // State machine
+  const PHASE = { PREP:"PREP", WORK:"WORK", REST:"REST", DONE:"DONE" };
+  let phase = prep > 0 ? PHASE.PREP : PHASE.WORK;
+  let repIndex = 1; // 1..reps
+  let remaining = (phase === PHASE.PREP) ? prep : work;
+
+  let startedAtMs = performance.now();
+  let lastTickMs = startedAtMs;
+  let elapsedTotal = 0; // in seconds, integer-ish
+
+  // Render first frame
+  render();
+
+  // Timer loop (timestamp-based to reduce drift)
+  const interval = setInterval(tick, 100);
+
+  resetBtn.addEventListener('click', resetAll);
+  skipBtn.addEventListener('click', skipPhase);
+
+  function tick(){
+    const now = performance.now();
+    const dt = (now - lastTickMs) / 1000;
+    lastTickMs = now;
+
+    // Accumulate fractional time, but decrement remaining when >= 1s to keep UI stable
+    // We'll do smooth decrement and floor for display.
+    remaining = Math.max(0, remaining - dt);
+
+    // Progress uses total elapsed (smooth)
+    const elapsedSmooth = Math.min(totalSeconds, (totalSeconds - remainingInScenario() + remainingScenarioElapsedSmooth()));
+    // Actually compute progress using derived total remaining across scenario:
+    const totalRemaining = remainingGlobalSmooth();
+    const progress = totalSeconds > 0 ? (1 - (totalRemaining / totalSeconds)) : 1;
+    progressBar.style.width = (Math.max(0, Math.min(1, progress)) * 100).toFixed(2) + "%";
+
+    if (remaining <= 0.001){
+      advance();
+    }
+    render();
+  }
+
+  function advance(){
+    if (phase === PHASE.PREP){
+      phase = PHASE.WORK;
+      remaining = work;
+      return;
+    }
+    if (phase === PHASE.WORK){
+      if (repIndex >= reps){
+        phase = PHASE.DONE;
+        remaining = 0;
+        onDone();
+        return;
+      }
+      // Go to REST only if rest > 0, otherwise jump directly to next WORK
+      if (rest > 0){
+        phase = PHASE.REST;
+        remaining = rest;
+      } else {
+        repIndex++;
+        phase = PHASE.WORK;
+        remaining = work;
+      }
+      return;
+    }
+    if (phase === PHASE.REST){
+      repIndex++;
+      phase = PHASE.WORK;
+      remaining = work;
+      return;
+    }
+  }
+
+  function onDone(){
+    clearInterval(interval);
+    setPhase("FIN", "accent");
+    phaseDot.style.boxShadow = "0 0 0 6px rgba(34,197,94,.18)";
+    timeDisplay.textContent = "00:00";
+    metaLine.textContent = `Terminé — ${reps} répétitions`;
+    progressBar.style.width = "100%";
+  }
+
+  function resetAll(){
+    // Full reset to initial
+    phase = prep > 0 ? PHASE.PREP : PHASE.WORK;
+    repIndex = 1;
+    remaining = (phase === PHASE.PREP) ? prep : work;
+    lastTickMs = performance.now();
+    // Restart page cleanly = simplest and avoids drift/interval re-init complexity
+    // Keep URL params intact
+    window.location.reload();
+  }
+
+  function skipPhase(){
+    if (phase === PHASE.DONE) return;
+    remaining = 0; // next tick will advance immediately
+  }
+
+  function render(){
+    // Phase label + dot color
+    if (phase === PHASE.PREP){
+      setPhase("PRÊT", "warn");
+      metaLine.textContent = metaText();
+    } else if (phase === PHASE.WORK){
+      setPhase("TRAVAIL", "accent");
+      metaLine.textContent = metaText();
+    } else if (phase === PHASE.REST){
+      setPhase("RÉCUP", "muted");
+      metaLine.textContent = metaText();
+    } else if (phase === PHASE.DONE){
+      // handled in onDone
+    }
+
+    timeDisplay.textContent = formatMMSS(Math.ceil(remaining));
+  }
+
+  function metaText(){
+    const repPart = `Répétition ${repIndex}/${reps}`;
+    const spec = `work ${work}s • rest ${rest}s` + (prep>0 ? ` • prep ${prep}s` : "");
+    const tzPart = tz ? ` • ${tz}` : "";
+    return repPart + " — " + spec + tzPart;
+  }
+
+  function setPhase(label, kind){
+    phaseText.textContent = label;
+
+    // Map dot & glow
+    if (kind === "accent"){
+      phaseDot.style.background = "var(--accent)";
+      phaseDot.style.boxShadow = "0 0 0 4px rgba(34,197,94,.18)";
+    } else if (kind === "warn"){
+      phaseDot.style.background = "var(--warn)";
+      phaseDot.style.boxShadow = "0 0 0 4px rgba(245,158,11,.18)";
+    } else if (kind === "danger"){
+      phaseDot.style.background = "var(--danger)";
+      phaseDot.style.boxShadow = "0 0 0 4px rgba(239,68,68,.18)";
+    } else {
+      phaseDot.style.background = "var(--muted)";
+      phaseDot.style.boxShadow = "0 0 0 4px rgba(156,163,175,.18)";
+    }
+  }
+
+  // Compute remaining across whole scenario smoothly (for progress)
+  function remainingGlobalSmooth(){
+    if (phase === PHASE.DONE) return 0;
+
+    // Remaining in current phase is `remaining`.
+    // Remaining future phases:
+    // If phase is PREP: remaining PREP + all reps: reps*work + (reps-1)*rest
+    // If phase is WORK: remaining work + future (if repIndex < reps => rest + (remaining reps)*work + (remaining rests))
+    // If phase is REST: remaining rest + remaining reps*work + remaining rests
+    if (phase === PHASE.PREP){
+      return remaining + (reps * work) + (Math.max(0, reps - 1) * rest);
+    }
+    if (phase === PHASE.WORK){
+      const repsLeftAfterThisWork = reps - repIndex; // reps remaining AFTER finishing current WORK
+      const restsLeft = Math.max(0, repsLeftAfterThisWork); // one rest between reps, so rest count equals reps left (since no rest after last)
+      // But if rest == 0, restsLeft contributes 0 anyway.
+      return remaining + (repsLeftAfterThisWork * work) + (restsLeft * rest);
+    }
+    if (phase === PHASE.REST){
+      const repsLeftIncludingNextWork = reps - repIndex; // reps remaining AFTER current rep (since REST happens after current rep work)
+      const restsLeftAfterThisRest = Math.max(0, repsLeftIncludingNextWork - 1);
+      return remaining + (repsLeftIncludingNextWork * work) + (restsLeftAfterThisRest * rest);
+    }
+    return 0;
+  }
+
+  // Helpers
+  function el(id){ return document.getElementById(id); }
+  function toInt(v, fallback){
+    if (v === null || v === undefined) return fallback;
+    const n = parseInt(String(v), 10);
+    return Number.isFinite(n) ? n : fallback;
+  }
+  function formatMMSS(total){
+    if (!Number.isFinite(total)) return "—";
+    const t = Math.max(0, total|0);
+    const mm = String(Math.floor(t/60)).padStart(2,'0');
+    const ss = String(t%60).padStart(2,'0');
+    return `${mm}:${ss}`;
+  }
+  function showError(msg){
+    errBox.style.display = "block";
+    errBox.textContent = msg;
+  }
+
+  // These are unused now but kept to avoid refactor noise if you extend later:
+  function remainingInScenario(){ return 0; }
+  function remainingScenarioElapsedSmooth(){ return 0; }
+
+})();
+</script>
+</body>
+</html>
