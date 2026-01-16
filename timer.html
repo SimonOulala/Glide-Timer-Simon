@@ -1,195 +1,332 @@
 <!doctype html>
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Timer</title>
-<style>
-  :root{
-    /* Bleu océan plus foncé */
-    --bg:#013A63;
-    --fg:#ffffff;
-  }
-  html,body{height:100%}
-  body{
-    margin:0; background:var(--bg); color:var(--fg);
-    font-family:system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,Arial;
-    display:flex; align-items:center; justify-content:center;
-    position:relative;
-  }
-  .wrap{
-    text-align:center;
-    padding:120px;
-    display:flex;
-    flex-direction:column;
-    align-items:center;
-    gap:clamp(12px, 5vh, 40px);
-  }
-  .phase{
-    font-size:clamp(35px,6vw,36px);
-    opacity:.95;
-    margin-bottom:24px;
-    font-weight:600
-  }
-  .phase.work{
-    font-size:clamp(45px,6vw,36px);
-    opacity:.95;
-    margin-bottom:24px;
-    font-weight:600
-  }
-  .time{ font-size:60px; letter-spacing:1px; line-height:1; font-weight:800 }
+<html lang="fr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Timer</title>
+  <style>
+    :root{
+      --bg:#0b0f14;
+      --card:#111827;
+      --text:#e5e7eb;
+      --muted:#9ca3af;
+      --accent:#22c55e;
+      --danger:#ef4444;
+      --warn:#f59e0b;
+      --barbg:#1f2937;
+    }
+    *{box-sizing:border-box}
+    html,body{height:100%}
+    body{
+      margin:0;
+      font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji","Segoe UI Emoji";
+      background:radial-gradient(1200px 600px at 50% 20%, rgba(34,197,94,.18), transparent 60%),
+                 radial-gradient(900px 500px at 20% 80%, rgba(245,158,11,.12), transparent 55%),
+                 var(--bg);
+      color:var(--text);
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      padding:16px;
+    }
+    .wrap{
+      width:min(680px, 100%);
+      background:rgba(17,24,39,.85);
+      border:1px solid rgba(255,255,255,.08);
+      box-shadow: 0 20px 60px rgba(0,0,0,.45);
+      border-radius:16px;
+      padding:22px 18px 18px;
+      position:relative;
+      overflow:hidden;
+    }
+    .top{
+      display:flex;
+      align-items:flex-start;
+      justify-content:space-between;
+      gap:12px;
+      margin-bottom:12px;
+    }
+    .status{ display:flex; flex-direction:column; gap:6px; }
+    .badge{
+      display:inline-flex;
+      align-items:center;
+      gap:8px;
+      padding:6px 10px;
+      border-radius:999px;
+      font-weight:700;
+      letter-spacing:.5px;
+      width:fit-content;
+      border:1px solid rgba(255,255,255,.10);
+      background:rgba(255,255,255,.04);
+    }
+    .dot{
+      width:10px;height:10px;border-radius:50%;
+      background:var(--muted);
+      box-shadow:0 0 0 4px rgba(156,163,175,.18);
+    }
+    .meta{
+      color:var(--muted);
+      font-size:14px;
+      line-height:1.25;
+      white-space:pre-wrap;
+    }
+    .time{
+      font-variant-numeric: tabular-nums;
+      font-size: clamp(56px, 10vw, 92px);
+      font-weight: 800;
+      letter-spacing: -1px;
+      text-align:right;
+      min-width: 180px;
+    }
+    .progress{
+      height:12px;
+      background:var(--barbg);
+      border-radius:999px;
+      overflow:hidden;
+      border:1px solid rgba(255,255,255,.08);
+      margin: 14px 0 12px;
+    }
+    .bar{
+      height:100%;
+      width:0%;
+      background:linear-gradient(90deg, rgba(34,197,94,.95), rgba(245,158,11,.90));
+      border-radius:999px;
+      transition: width .15s linear;
+    }
+    .controls{
+      display:flex;
+      gap:10px;
+      margin-top:10px;
+    }
+    button{
+      appearance:none;
+      border:none;
+      border-radius:12px;
+      padding:12px 14px;
+      font-weight:700;
+      cursor:pointer;
+      color:var(--text);
+      background:rgba(255,255,255,.06);
+      border:1px solid rgba(255,255,255,.10);
+      flex:1;
+      transition: transform .05s ease, background .15s ease;
+    }
+    button:hover{ background:rgba(255,255,255,.09); }
+    button:active{ transform: translateY(1px); }
+    .btn-primary{
+      background:rgba(34,197,94,.18);
+      border-color:rgba(34,197,94,.35);
+    }
+    .btn-warn{
+      background:rgba(245,158,11,.16);
+      border-color:rgba(245,158,11,.35);
+    }
+    .err{
+      margin-top:10px;
+      padding:10px 12px;
+      border-radius:12px;
+      border:1px solid rgba(239,68,68,.35);
+      background:rgba(239,68,68,.10);
+      color:#fecaca;
+      font-size:14px;
+      display:none;
+      white-space:pre-wrap;
+    }
+    .brand{
+      position:absolute;
+      right:14px;
+      bottom:10px;
+      color:rgba(229,231,235,.60);
+      font-size:13px;
+      font-weight:700;
+      letter-spacing:.2px;
+      user-select:none;
+    }
+    .hint{
+      color:rgba(156,163,175,.75);
+      font-size:12px;
+      margin-top:6px;
+      text-align:center;
+    }
+  </style>
+</head>
 
-  /* Signature */
-  .brand{
-    position:absolute;
-    right:14px;
-    bottom:10px;
-    font-size:13px;
-    font-weight:700;
-    letter-spacing:.2px;
-    opacity:.75;
-    user-select:none;
-  }
-</style>
+<body>
+  <div class="wrap">
+    <div class="top">
+      <div class="status">
+        <div class="badge">
+          <span class="dot" id="phaseDot"></span>
+          <span id="phaseText">PRÊT</span>
+        </div>
+        <div class="meta" id="metaLine">—</div>
+      </div>
+      <div class="time" id="timeDisplay">00:00</div>
+    </div>
 
-<div class="wrap">
-  <div class="phase" id="phase">Prépare toi pour l'exercice</div>
-  <div class="time" id="time">00:00</div>
-</div>
-<div class="brand">Coach Simon</div>
+    <div class="progress" aria-label="Progression">
+      <div class="bar" id="progressBar"></div>
+    </div>
+
+    <div class="controls">
+      <button class="btn-primary" id="resetBtn" type="button">Reset</button>
+      <button class="btn-warn" id="skipBtn" type="button">Skip</button>
+    </div>
+
+    <div class="hint" id="hintLine">prep → durée → fin</div>
+    <div class="err" id="errBox"></div>
+
+    <div class="brand">Coach Simon</div>
+  </div>
 
 <script>
-  // --- Params envoyés par Glide ---
-  const q = new URLSearchParams(location.search);
-  const prep = Math.max(0, +q.get('prep')||0);   // secondes de préparation
-  const dur  = Math.max(0, +q.get('dur')||0);    // secondes de travail
-  const start = Date.now();
-  const mode  = (q.get('mode') || 'work');       // 'work' (défaut) ou 'rest'
+(function(){
+  const qs = new URLSearchParams(location.search);
 
-  // Option vibration sur les 5 dernières secondes (0/1)
-  // ex: &vib=1
-  const vibEnabled = (q.get('vib') || '0') === '1';
+  const prep = toInt(qs.get('prep'), 0);
+  const dur  = toInt(qs.get('dur'), null);
+  const mode = (qs.get('mode') || 'work').trim().toLowerCase(); // work | rest
+  const tz   = (qs.get('tz') || '').trim();
+  const startStr = qs.get('start'); // optional (ISO recommandé)
+  // cb volontairement ignoré
 
-  const phaseEl = document.getElementById('phase');
-  const timeEl  = document.getElementById('time');
+  const errBox = el('errBox');
+  const phaseText = el('phaseText');
+  const phaseDot  = el('phaseDot');
+  const metaLine  = el('metaLine');
+  const timeDisplay = el('timeDisplay');
+  const progressBar = el('progressBar');
 
-  // --- Wake Lock (garder l'écran allumé) ---
-  let wakeLock = null;
-  async function requestWakeLock() {
-    try {
-      if ('wakeLock' in navigator && !wakeLock) {
-        wakeLock = await navigator.wakeLock.request('screen');
-        wakeLock.addEventListener?.('release', () => { wakeLock = null; });
-      }
-    } catch (e) { console.log('WakeLock error', e); }
+  const resetBtn = el('resetBtn');
+  const skipBtn  = el('skipBtn');
+
+  const problems = [];
+  if (dur === null || dur <= 0) problems.push("Paramètre requis invalide : dur (secondes, > 0)");
+  if (prep < 0) problems.push("Paramètre invalide : prep (>= 0)");
+
+  if (problems.length){
+    showError("❌ URL invalide.\n" + problems.map(p=>"• "+p).join("\n") +
+      "\n\nExemple : timer.html?prep=10&dur=75&tz=Europe/Paris&cb=123");
+    setPhase("ERREUR", "danger");
+    timeDisplay.textContent = "—";
+    metaLine.textContent = "Corrige les paramètres URL.";
+    progressBar.style.width = "0%";
+    resetBtn.disabled = true;
+    skipBtn.disabled = true;
+    return;
   }
-  document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'visible' && !wakeLock) requestWakeLock();
+
+  const totalSeconds = prep + dur;
+
+  let startMs = parseStart(startStr);
+  if (!startStr) startMs = Date.now(); // sans start = timer “local” (comme aujourd’hui avec cb)
+
+  const iv = setInterval(tick, 120);
+  tick();
+
+  resetBtn.addEventListener('click', () => location.reload());
+
+  skipBtn.addEventListener('click', () => {
+    // Skip = passe la phase actuelle (prep -> run, run -> fin)
+    const elapsed = (Date.now() - startMs)/1000;
+    if (prep > 0 && elapsed < prep){
+      startMs = Date.now() - (prep * 1000);
+    } else {
+      startMs = Date.now() - (totalSeconds * 1000);
+    }
+    tick();
   });
-  window.addEventListener('click', requestWakeLock, { once: true });
-  window.addEventListener('touchstart', requestWakeLock, { once: true });
-  requestWakeLock();
-  window.addEventListener('beforeunload', () => { try { wakeLock?.release(); } catch {} });
 
-  // --- Utils ---
-  const fmt = (s)=>{
-    s = Math.max(0, Math.floor(s));
-    const m = Math.floor(s/60).toString().padStart(2,'0');
-    const sec = (s%60).toString().padStart(2,'0');
-    return `${m}:${sec}`;
-  };
-
-  const shortBeep = (freq=1000, dur=120, vol=0.12)=>{
-    try{
-      const C = window.AudioContext||window.webkitAudioContext;
-      const ctx = new C();
-      const o = ctx.createOscillator(), g = ctx.createGain();
-      o.connect(g); g.connect(ctx.destination);
-      o.type='sine'; o.frequency.value=freq; g.gain.value=vol;
-      o.start(); setTimeout(()=>{o.stop(); ctx.close();}, dur);
-    }catch(e){}
-  };
-  const longBeep = (freq=880, dur=320, vol=0.16)=>{
-    try{
-      const C = window.AudioContext||window.webkitAudioContext;
-      const ctx = new C();
-      const o = ctx.createOscillator(), g = ctx.createGain();
-      o.connect(g); g.connect(ctx.destination);
-      o.type='sine'; o.frequency.value=freq; g.gain.value=vol;
-      o.start(); setTimeout(()=>{o.stop(); ctx.close();}, dur);
-    }catch(e){}
-  };
-
-  // Vibration helper (si supporté)
-  const buzz = (pattern)=>{
-    if (!vibEnabled) return;
-    if (navigator.vibrate) navigator.vibrate(pattern);
-  };
-
-  // états pour biper une seule fois par seconde affichée
-  let lastPrepDisplay = null;
-  let lastRunDisplay  = null;
-  let endLongBeepDone = false;
-
-  const tick = ()=>{
+  function tick(){
     const now = Date.now();
-    const elapsed = (now - start)/1000;
+    const elapsed = (now - startMs)/1000;
 
     const prepRemain = Math.max(0, prep - elapsed);
-    const runRemain  = Math.max(0, prep + dur - elapsed);
+    const runRemain  = Math.max(0, totalSeconds - elapsed);
 
-    // --- Phase Préparation ---
-    if (prep > 0 && prepRemain > 0) {
-      phaseEl.textContent = "Prépare toi pour l'exercice";
-      phaseEl.className = "phase";
-      const disp = Math.floor(prepRemain);
-      timeEl.textContent = fmt(prepRemain);
+    // Progress
+    const p = totalSeconds > 0 ? Math.max(0, Math.min(1, elapsed / totalSeconds)) : 1;
+    progressBar.style.width = (p*100).toFixed(2) + "%";
 
-      if (disp !== lastPrepDisplay) {
-        // bip sur les 5 dernières secondes (5..1), puis bip long sur 0
-        if (disp <= 5 && disp >= 1) {
-          shortBeep(1000); buzz(50);
-        }
-        if (disp === 0) {
-          longBeep(900, 360, 0.18);
-          buzz([80,40,80]);
-        }
-        lastPrepDisplay = disp;
-      }
+    // PREP
+    if (prep > 0 && prepRemain > 0){
+      setPhase("PRÊT", "warn");
+      timeDisplay.textContent = mmss(Math.ceil(prepRemain));
+      metaLine.textContent = metaText("Décompte", prep, dur, mode, tz);
       return;
     }
 
-    // --- Phase Travail (ou Récupération si mode=rest) ---
-    if (runRemain > 0) {
-      phaseEl.textContent = (mode === 'rest') ? "Récupération" : "C'est parti !";
-      phaseEl.className   = (mode === 'rest') ? "phase" : "phase work";
-      const disp = Math.floor(runRemain);
-      timeEl.textContent = fmt(runRemain);
-
-      if (disp !== lastRunDisplay) {
-        // bip sur les 5 dernières secondes (5..1), puis bip long sur 0
-        if (disp <= 5 && disp >= 1) {
-          shortBeep(1200); buzz(50);
-        }
-        if (disp === 0) {
-          longBeep(880, 420, 0.2);
-          buzz([100,60,120]);
-          endLongBeepDone = true;
-        }
-        lastRunDisplay = disp;
-      }
+    // RUN
+    if (runRemain > 0){
+      const label = (mode === 'rest') ? "RÉCUP" : "TRAVAIL";
+      setPhase(label, (mode === 'rest') ? "muted" : "accent");
+      timeDisplay.textContent = mmss(Math.ceil(runRemain));
+      metaLine.textContent = metaText(label, prep, dur, mode, tz);
       return;
     }
 
-    // --- Terminé ---
-    phaseEl.textContent = (mode === 'rest') ? "Repos terminé" : "Terminé";
-    phaseEl.className = "phase";
-    timeEl.textContent  = "00:00";
-    if (!endLongBeepDone) {
-      longBeep(880, 420, 0.2);
-      buzz([100,60,120]);
-      endLongBeepDone = true;
-    }
-  };
+    // DONE
+    clearInterval(iv);
+    setPhase("FIN", "accent");
+    timeDisplay.textContent = "00:00";
+    progressBar.style.width = "100%";
+    metaLine.textContent = (mode === 'rest') ? "Repos terminé." : "Terminé.";
+  }
 
-  tick();
-  const iv = setInterval(tick, 200);
-  setTimeout(()=>clearInterval(iv), 2*60*60*1000);
+  function metaText(label, prepS, durS, mode, tz){
+    const spec = `prep ${prepS}s • dur ${durS}s` + (mode === 'rest' ? " • mode rest" : "");
+    const tzPart = tz ? ` • ${tz}` : "";
+    return `${label}\n${spec}${tzPart}`;
+  }
+
+  function setPhase(label, kind){
+    phaseText.textContent = label;
+    if (kind === "accent"){
+      phaseDot.style.background = "var(--accent)";
+      phaseDot.style.boxShadow = "0 0 0 4px rgba(34,197,94,.18)";
+    } else if (kind === "warn"){
+      phaseDot.style.background = "var(--warn)";
+      phaseDot.style.boxShadow = "0 0 0 4px rgba(245,158,11,.18)";
+    } else if (kind === "danger"){
+      phaseDot.style.background = "var(--danger)";
+      phaseDot.style.boxShadow = "0 0 0 4px rgba(239,68,68,.18)";
+    } else {
+      phaseDot.style.background = "var(--muted)";
+      phaseDot.style.boxShadow = "0 0 0 4px rgba(156,163,175,.18)";
+    }
+  }
+
+  function parseStart(s){
+    if (!s) return Date.now();
+    const d = new Date(s);
+    if (!isNaN(d)) return d.getTime();
+    const m = s.match(/(\d{2})\/(\d{2})\/(\d{4})\s+(\d{2}):(\d{2}):(\d{2})/);
+    if (m){
+      const [,dd,MM,yyyy,hh,mm,ss] = m;
+      return new Date(`${yyyy}-${MM}-${dd}T${hh}:${mm}:${ss}`).getTime();
+    }
+    return Date.now();
+  }
+
+  function mmss(total){
+    total = Math.max(0, total|0);
+    const mm = String(Math.floor(total/60)).padStart(2,'0');
+    const ss = String(total%60).padStart(2,'0');
+    return `${mm}:${ss}`;
+  }
+
+  function showError(msg){
+    errBox.style.display = "block";
+    errBox.textContent = msg;
+  }
+
+  function el(id){ return document.getElementById(id); }
+  function toInt(v, fallback){
+    if (v === null || v === undefined) return fallback;
+    const n = parseInt(String(v), 10);
+    return Number.isFinite(n) ? n : fallback;
+  }
+})();
 </script>
+</body>
+</html>
