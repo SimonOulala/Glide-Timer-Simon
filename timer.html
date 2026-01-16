@@ -46,7 +46,11 @@
       gap:12px;
       margin-bottom:12px;
     }
-    .status{ display:flex; flex-direction:column; gap:6px; }
+    .status{
+      display:flex;
+      flex-direction:column;
+      gap:6px;
+    }
     .badge{
       display:inline-flex;
       align-items:center;
@@ -68,7 +72,7 @@
       color:var(--muted);
       font-size:14px;
       line-height:1.25;
-      white-space:pre-wrap;
+      max-width: 320px;
     }
     .time{
       font-variant-numeric: tabular-nums;
@@ -150,12 +154,11 @@
     }
   </style>
 </head>
-
 <body>
   <div class="wrap">
     <div class="top">
       <div class="status">
-        <div class="badge">
+        <div class="badge" id="phaseBadge">
           <span class="dot" id="phaseDot"></span>
           <span id="phaseText">PRÊT</span>
         </div>
@@ -181,14 +184,15 @@
 
 <script>
 (function(){
-  const qs = new URLSearchParams(location.search);
+  const qs = new URLSearchParams(window.location.search);
 
-  const prep = toInt(qs.get('prep'), 0);
-  const dur  = toInt(qs.get('dur'), null);
-  const mode = (qs.get('mode') || 'work').trim().toLowerCase(); // work | rest
-  const tz   = (qs.get('tz') || '').trim();
-  const startStr = qs.get('start'); // optional (ISO recommandé)
-  // cb volontairement ignoré
+  // Params
+  const prep = toInt(qs.get('prep'), 0);             // secondes (>=0)
+  const dur  = toInt(qs.get('dur'), null);           // secondes (>0) requis
+  const mode = (qs.get('mode') || 'work').trim();    // work|rest (label only)
+  const startStr = (qs.get('start') || '').trim();   // optionnel (ISO ou DD/MM/YYYY HH:mm:ss)
+  const tz   = (qs.get('tz') || '').trim();          // optionnel (affichage meta)
+  const vib  = parseBool(qs.get('vib'), true);       // optionnel: vib=0 pour couper
 
   const errBox = el('errBox');
   const phaseText = el('phaseText');
@@ -199,84 +203,193 @@
 
   const resetBtn = el('resetBtn');
   const skipBtn  = el('skipBtn');
+  const hintLine = el('hintLine');
 
+  // Validation
   const problems = [];
-  if (dur === null || dur <= 0) problems.push("Paramètre requis invalide : dur (secondes, > 0)");
   if (prep < 0) problems.push("Paramètre invalide : prep (>= 0)");
+  if (dur === null || dur <= 0) problems.push("Paramètre requis invalide : dur (secondes, > 0)");
 
   if (problems.length){
-    showError("❌ URL invalide.\n" + problems.map(p=>"• "+p).join("\n") +
-      "\n\nExemple : timer.html?prep=10&dur=75&tz=Europe/Paris&cb=123");
+    showError(
+      "❌ URL invalide.\n" +
+      problems.map(p=>"• "+p).join("\n") +
+      "\n\nExemple : timer.html?prep=10&dur=75&tz=Europe/Paris&cb=123"
+    );
     setPhase("ERREUR", "danger");
     timeDisplay.textContent = "—";
     metaLine.textContent = "Corrige les paramètres URL.";
     progressBar.style.width = "0%";
     resetBtn.disabled = true;
     skipBtn.disabled = true;
+    hintLine.textContent = "prep → durée → fin";
     return;
   }
 
+  // --- Wake Lock (écran allumé) ---
+  let wakeLock = null;
+  async function requestWakeLock() {
+    try {
+      if ('wakeLock' in navigator && !wakeLock) {
+        wakeLock = await navigator.wakeLock.request('screen');
+        wakeLock.addEventListener?.('release', () => { wakeLock = null; });
+      }
+    } catch (e) {}
+  }
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible' && !wakeLock) requestWakeLock();
+  });
+
+  // --- Audio unlock (iOS/Chrome policies) ---
+  let audioCtx = null;
+  async function unlockAudio(){
+    try{
+      const C = window.AudioContext || window.webkitAudioContext;
+      if (!C) return;
+      if (!audioCtx) audioCtx = new C();
+      if (audioCtx.state === 'suspended') await audioCtx.resume();
+    }catch(e){}
+  }
+  function oneTapUnlock(){
+    unlockAudio();
+    requestWakeLock();
+  }
+  window.addEventListener('pointerdown', oneTapUnlock, { once:true });
+  window.addEventListener('touchstart', oneTapUnlock, { once:true });
+
+  // --- Beep & vibrate ---
+  function beep(freq=1200, ms=110, vol=0.12){
+    try{
+      const C = window.AudioContext || window.webkitAudioContext;
+      if (!C) return;
+      if (!audioCtx) audioCtx = new C();
+      if (audioCtx.state === 'suspended') return; // sera débloqué au tap
+      const o = audioCtx.createOscillator();
+      const g = audioCtx.createGain();
+      o.type = 'sine';
+      o.frequency.value = freq;
+      g.gain.value = vol;
+      o.connect(g); g.connect(audioCtx.destination);
+      o.start();
+      setTimeout(()=>{ try{o.stop();}catch{} }, ms);
+    }catch(e){}
+  }
+  function buzz(ms=60){
+    if (!vib) return;
+    try{ if (navigator.vibrate) navigator.vibrate(ms); }catch(e){}
+  }
+
+  // --- Time model ---
   const totalSeconds = prep + dur;
 
+  // startMs : permet de synchroniser si start est passé
   let startMs = parseStart(startStr);
-  if (!startStr) startMs = Date.now(); // sans start = timer “local” (comme aujourd’hui avec cb)
 
-  const iv = setInterval(tick, 120);
-  tick();
+  // State
+  const PHASE = { PREP:"PREP", RUN:"RUN", DONE:"DONE" };
+  let phase = (prep > 0) ? PHASE.PREP : PHASE.RUN;
 
-  resetBtn.addEventListener('click', () => location.reload());
+  // For 3-2-1 beeps once per second
+  let lastPrepDisp = null;
+  let lastRunDisp  = null;
 
-  skipBtn.addEventListener('click', () => {
-    // Skip = passe la phase actuelle (prep -> run, run -> fin)
-    const elapsed = (Date.now() - startMs)/1000;
-    if (prep > 0 && elapsed < prep){
-      startMs = Date.now() - (prep * 1000);
-    } else {
-      startMs = Date.now() - (totalSeconds * 1000);
+  // First render
+  renderFrame();
+
+  // Timer loop
+  const iv = setInterval(tick, 100);
+
+  resetBtn.addEventListener('click', ()=>{
+    oneTapUnlock();
+    // reset = redémarre proprement
+    window.location.reload();
+  });
+
+  skipBtn.addEventListener('click', ()=>{
+    oneTapUnlock();
+    const now = Date.now();
+    if (phase === PHASE.PREP){
+      // saute prep => on met startMs comme si prep était déjà passé
+      startMs = now - (prep * 1000) - 10;
+    } else if (phase === PHASE.RUN){
+      // saute run => fin
+      startMs = now - ((prep + dur) * 1000) - 10;
     }
-    tick();
+    renderFrame();
   });
 
   function tick(){
-    const now = Date.now();
-    const elapsed = (now - startMs)/1000;
-
-    const prepRemain = Math.max(0, prep - elapsed);
-    const runRemain  = Math.max(0, totalSeconds - elapsed);
-
-    // Progress
-    const p = totalSeconds > 0 ? Math.max(0, Math.min(1, elapsed / totalSeconds)) : 1;
-    progressBar.style.width = (p*100).toFixed(2) + "%";
-
-    // PREP
-    if (prep > 0 && prepRemain > 0){
-      setPhase("PRÊT", "warn");
-      timeDisplay.textContent = mmss(Math.ceil(prepRemain));
-      metaLine.textContent = metaText("Décompte", prep, dur, mode, tz);
-      return;
-    }
-
-    // RUN
-    if (runRemain > 0){
-      const label = (mode === 'rest') ? "RÉCUP" : "TRAVAIL";
-      setPhase(label, (mode === 'rest') ? "muted" : "accent");
-      timeDisplay.textContent = mmss(Math.ceil(runRemain));
-      metaLine.textContent = metaText(label, prep, dur, mode, tz);
-      return;
-    }
-
-    // DONE
-    clearInterval(iv);
-    setPhase("FIN", "accent");
-    timeDisplay.textContent = "00:00";
-    progressBar.style.width = "100%";
-    metaLine.textContent = (mode === 'rest') ? "Repos terminé." : "Terminé.";
+    renderFrame();
   }
 
-  function metaText(label, prepS, durS, mode, tz){
-    const spec = `prep ${prepS}s • dur ${durS}s` + (mode === 'rest' ? " • mode rest" : "");
-    const tzPart = tz ? ` • ${tz}` : "";
-    return `${label}\n${spec}${tzPart}`;
+  function renderFrame(){
+    const now = Date.now();
+    const elapsed = (now - startMs) / 1000;
+
+    const prepRemain = Math.max(0, prep - elapsed);
+    const runRemain  = Math.max(0, (prep + dur) - elapsed);
+
+    // Progress (0..1)
+    const totalRemaining = (prep > 0 && prepRemain > 0) ? (prepRemain + dur) : runRemain;
+    const progress = totalSeconds > 0 ? (1 - (totalRemaining / totalSeconds)) : 1;
+    progressBar.style.width = (Math.max(0, Math.min(1, progress)) * 100).toFixed(2) + "%";
+
+    // --- PREP ---
+    if (prep > 0 && prepRemain > 0){
+      phase = PHASE.PREP;
+      setPhase("PRÊT", "warn");
+      metaLine.textContent = metaText("Décompte", prep, dur, tz);
+      const disp = Math.ceil(prepRemain);
+      timeDisplay.textContent = formatMMSS(disp);
+
+      // Beeps + vibrations sur 3-2-1 du décompte
+      if (disp !== lastPrepDisp){
+        if (disp === 3 || disp === 2 || disp === 1){
+          beep(1100, 110, 0.14);
+          buzz(70);
+        }
+        lastPrepDisp = disp;
+      }
+      return;
+    }
+
+    // --- RUN ---
+    if (runRemain > 0){
+      phase = PHASE.RUN;
+      const label = (mode === 'rest') ? "RÉCUP" : "DURÉE";
+      setPhase(label, "accent");
+      metaLine.textContent = metaText(label, prep, dur, tz);
+
+      const disp = Math.ceil(runRemain);
+      timeDisplay.textContent = formatMMSS(disp);
+
+      // Beeps + vibrations sur 3-2-1 du minuteur
+      if (disp !== lastRunDisp){
+        if (disp === 3 || disp === 2 || disp === 1){
+          beep(1300, 110, 0.14);
+          buzz(70);
+        }
+        lastRunDisp = disp;
+      }
+      return;
+    }
+
+    // --- DONE ---
+    if (phase !== PHASE.DONE){
+      phase = PHASE.DONE;
+      clearInterval(iv);
+    }
+    setPhase("FIN", "accent");
+    phaseDot.style.boxShadow = "0 0 0 6px rgba(34,197,94,.18)";
+    timeDisplay.textContent = "00:00";
+    metaLine.textContent = "Terminé";
+    progressBar.style.width = "100%";
+  }
+
+  function metaText(mainLabel, prepSec, durSec, tzStr){
+    const base = `prep ${prepSec}s • dur ${durSec}s`;
+    const tzPart = tzStr ? ` • ${tzStr}` : "";
+    return `${mainLabel} — ${base}${tzPart}`;
   }
 
   function setPhase(label, kind){
@@ -308,23 +421,28 @@
     return Date.now();
   }
 
-  function mmss(total){
-    total = Math.max(0, total|0);
-    const mm = String(Math.floor(total/60)).padStart(2,'0');
-    const ss = String(total%60).padStart(2,'0');
+  function el(id){ return document.getElementById(id); }
+  function toInt(v, fallback){
+    if (v === null || v === undefined || v === "") return fallback;
+    const n = parseInt(String(v), 10);
+    return Number.isFinite(n) ? n : fallback;
+  }
+  function parseBool(v, fallback){
+    if (v === null || v === undefined || v === "") return fallback;
+    const s = String(v).toLowerCase().trim();
+    if (s === "0" || s === "false" || s === "no") return false;
+    if (s === "1" || s === "true"  || s === "yes") return true;
+    return fallback;
+  }
+  function formatMMSS(total){
+    const t = Math.max(0, total|0);
+    const mm = String(Math.floor(t/60)).padStart(2,'0');
+    const ss = String(t%60).padStart(2,'0');
     return `${mm}:${ss}`;
   }
-
   function showError(msg){
     errBox.style.display = "block";
     errBox.textContent = msg;
-  }
-
-  function el(id){ return document.getElementById(id); }
-  function toInt(v, fallback){
-    if (v === null || v === undefined) return fallback;
-    const n = parseInt(String(v), 10);
-    return Number.isFinite(n) ? n : fallback;
   }
 })();
 </script>
